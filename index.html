@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Track to Map</title>
+	<link href='https://fonts.googleapis.com/css?family=Roboto Mono' rel='stylesheet'>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+		integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+		crossorigin=""/>
+   	<style>
+		body {
+			font-family: 'Roboto Mono';
+			font-size: 16px;
+		}
+		input {
+			font-family: 'Roboto Mono';
+			font-size: 16px;
+		}
+		span {
+			font-weight: bold;
+		}
+		#info {
+			display: none;
+			padding-top: 10px;
+			padding-bottom: 10px;
+			font-weight: normal;
+		}
+		#map {
+			width: 100%;
+			max-width: 1000px;
+			height: 500px; 
+		}
+		.chart {
+			width: 100%;
+			max-width: 1000px;
+			height: 400px;
+		}
+  	</style>
+</head>
+<body>
+	<h2>From gpx Track to Map</h2>
+
+    <h3 id="track-name"></h3>
+	
+	<input type="file" id="inputfile" size="50">
+
+    <div id="info">
+		Distance: <span id="totalDistance"></span> km <br/>
+		Time tot: <span id="totalTime"></span> (<span id="startTime"></span> -> <span id="endTime"></span>) <br/>
+		MaxSpeed: <span id="maxSpeed"></span> km/h
+	</div>
+  
+    <div id="map"></div>
+
+    <div class="chart" id="groundSpeed"></div>
+
+    <div class="chart" id="altitude"></div>
+
+    <script src="gpx-parser.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+   		integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+   		crossorigin=""></script>
+
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/series-label.js"></script>
+    <script src="https://code.highcharts.com/modules/exporting.js"></script>
+
+	<script>
+	// esempio visto https://tracks.aaronlenoir.com/?track=tracks/flights/flight-010-20190917.gpx
+	let mymap = "";
+	var maxSpeed = 0;
+
+	// listen inputfile change
+	document.getElementById('inputfile')
+		.addEventListener('change', function() {
+
+			var fr=new FileReader();
+			fr.onload=function(){
+				renderMapGpx(fr.result);
+			}
+			
+			fr.readAsText(this.files[0]);
+		})
+
+	document.getElementById('inputfile')
+		.addEventListener('click', function() {
+			resetAll();
+		})
+	
+	// clear all div
+	function resetAll(){
+		mymap.off();
+		mymap.remove();
+	}
+
+	// draw the map
+	function drawMap(track) {
+		mymap = L.map('map');
+		
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+			maxZoom: 50
+		}).addTo(mymap);
+	}
+
+	// draw the track
+	function drawTrack(track) {
+		let coordinates = track.points.map(p => [p.lat.toFixed(5), p.lon.toFixed(5)]);
+
+		var polyline = L.polyline(coordinates, { weight: 6, color: 'green' }).addTo(mymap);
+
+		// zoom the map to the polyline
+		mymap.fitBounds(polyline.getBounds());
+	}
+
+	// draw the track
+	function drawStartEnd(track) {
+		let coordinates = track.points.map(p => [p.lat.toFixed(5), p.lon.toFixed(5)]);
+
+		const LeafIcon = L.Icon.extend({
+		options: {
+			iconSize:     [40, 56],
+			iconAnchor:   [1, 50],
+			popupAnchor:  [-3, -76]
+		}
+		});
+
+		const startIcon = new LeafIcon({iconUrl: 'icon_start.png'});
+		const endIcon = new LeafIcon({iconUrl: 'icon_end.png'});
+
+		const tStart = track.points[0].time.getHours().toString().padStart(2, '0') + ":" + track.points[0].time.getMinutes().toString().padStart(2, '0');
+		const tEnd = track.points[track.points.length-1].time.getHours().toString().padStart(2, '0') + ":" + track.points[track.points.length-1].time.getMinutes().toString().padStart(2, '0');
+
+		const mStart = L.marker([track.points[0].lat, track.points[0].lon], {icon: startIcon}).bindPopup('Start time '+tStart).addTo(mymap);
+		const mEnd = L.marker([track.points[track.points.length-1].lat, track.points[track.points.length-1].lon], {icon: endIcon}).bindPopup('Arrival time '+tEnd).addTo(mymap);
+
+
+	}
+
+	// return minutes:seconds from milliseconds
+	function millisToMinutesAndSeconds(millis) {
+		var minutes = Math.floor(millis / 60000);
+		var seconds = ((millis % 60000) / 1000).toFixed(0);
+		return minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
+	}
+
+	// render map and track
+	function renderMapGpx(gpxFile) {
+		let gpx = new gpxParser();	
+		gpx.parse(gpxFile);
+
+		document.getElementById("track-name").innerText = gpx.tracks[0].name;
+
+		document.getElementById("totalDistance").innerText = (gpx.tracks[0].distance.total / 1000).toFixed(2);
+
+		document.getElementById("startTime").innerText = gpx.tracks[0].points[0].time.getHours() + ":" + ('0'+gpx.tracks[0].points[0].time.getMinutes()).slice(-2) ;
+		document.getElementById("endTime").innerText = gpx.tracks[0].points[gpx.tracks[0].points.length-1].time.getHours() + ":" + ('0'+gpx.tracks[0].points[gpx.tracks[0].points.length-1].time.getMinutes()).slice(-2);
+
+		timeTot = Math.abs(gpx.tracks[0].points[gpx.tracks[0].points.length-1].time  - gpx.tracks[0].points[0].time);
+		document.getElementById("totalTime").innerText = millisToMinutesAndSeconds(timeTot);
+
+		drawMap();
+		
+		drawTrack(gpx.tracks[0]);
+
+		drawStartEnd(gpx.tracks[0]);
+		
+		getSpeedChart(getSpeedData(gpx.tracks[0]));
+		
+		drawAltitudeChart(getElevationData(gpx.tracks[0]));
+
+		document.getElementById("maxSpeed").innerText = maxSpeed.toFixed(2);
+		document.getElementById("info").style.display = "block"; 
+	}
+
+	// Returns an array of time - speed for each track point (that has a time value)
+	function getSpeedData(track) {
+		let result = [];
+
+		let gpx = new gpxParser();
+
+		let points = track.points.filter(p => p.time !== null);
+
+		let previousPoint = null;
+
+		for (let i = 0; i < points.length; i++) {
+			let point = points[i];
+
+			if (previousPoint) {
+				// in seconds
+				let time = Math.abs(point.time - previousPoint.time) / 1000;
+				// in km
+				let distance = gpx.calcDistanceBetween(previousPoint, point);
+				let speedInKmPerHour = (point.speed * 3.6);
+				let speedInKmPerHourFixed = speedInKmPerHour.toFixed(2);		
+				if (maxSpeed < speedInKmPerHour) { maxSpeed = speedInKmPerHour; };
+				result.push([point.time.getTime(), speedInKmPerHour]);
+			}
+
+			previousPoint = point;
+		}
+
+		return result;
+	} //end function getSpeedData(track)
+
+
+	function getSpeedChart(dataPoints) {
+		//console.log(dataPoints);
+		Highcharts.chart('groundSpeed', {
+			chart: {
+				type: 'area'
+			},
+			title: {
+				text: 'Speed (km/h)'
+			},
+			subtitle: {
+				text: 'Speed'
+			},
+			xAxis: {
+				type: 'datetime',
+				dateTimeLabelFormats: {
+					month: '%e. %b',
+					year: '%b'
+				},
+				title: {
+					text: 'Date'
+				}
+			},
+			yAxis: {
+				title: {
+					text: 'Speed (km/h)'
+				}
+			},
+			tooltip: {
+				headerFormat: '<b>{series.name}</b><br>',
+				pointFormat: '{point.x:%d/%m/%y %H:%M:%S}: {point.y:.2f} km/h'
+			},
+
+			plotOptions: {
+				spline: {
+					marker: {
+						enabled: true
+					}
+				}
+			},
+
+			colors: ['#6CF', '#39F', '#06C', '#036', '#000'],
+
+			series: [{
+				name: "Speed (km/h)",
+				data: dataPoints
+			}],
+
+			time: { useUTC: false }
+		});
+	}; // end function getSpeedChart(dataPoints)
+
+
+	function getElevationData(track) {
+		let result = [];
+
+		let gpx = new gpxParser();
+
+		let points = track.points.filter(p => p.time !== null);
+
+		let previousPoint = null;
+
+		for (let i = 0; i < points.length; i++) {
+			let point = points[i];
+
+			if (previousPoint) {
+				// in seconds
+				let time = Math.abs(point.time - previousPoint.time) / 1000;
+
+				// in mt
+				let elevation = point.ele;
+
+				result.push([point.time.getTime(), elevation]);
+			}
+
+			previousPoint = point;
+		}
+		return result;
+	} //end function getElevationData(track)
+
+
+	function drawAltitudeChart(dataPoints) {
+		//console.log(dataPoints);
+		Highcharts.chart('altitude', {
+			chart: {
+				type: 'area'
+			},
+			title: {
+				text: 'Altitude (meter)'
+			},
+			subtitle: {
+				text: 'Altitude en route'
+			},
+			xAxis: {
+				type: 'datetime',
+				dateTimeLabelFormats: {
+					month: '%e. %b',
+					year: '%b'
+				},
+				title: {
+					text: 'Date'
+				}
+			},
+			yAxis: {
+				title: {
+					text: 'Altitude (meter)'
+				}
+			},
+			tooltip: {
+				headerFormat: '<b>{series.name}</b><br>',
+				pointFormat: '{point.x:%d/%m/%y %H:%M}: {point.y:.2f} mt'
+			},
+
+			plotOptions: {
+				spline: {
+					marker: {
+						enabled: true
+					}
+				}
+			},
+
+			colors: ['#6CF', '#39F', '#06C', '#036', '#000'],
+
+			series: [{
+				name: "Altitude (meter)",
+				data: dataPoints
+			}],
+
+			time: { useUTC: false }
+		});
+	}; // end function drawAltitudeChart(track)
+	</script>
+
+</body>
+</html>
